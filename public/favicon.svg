@@ -1,0 +1,15 @@
+<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" class="lucide lucide-list-music-icon lucide-list-music" stroke-linejoin="round" stroke-linecap="round" stroke-width="2" stroke="currentColor" fill="none">
+ <title>spotify-migrator-fav</title>
+
+ <g>
+  <title>Layer 1</title>
+  <ellipse stroke-width="0" ry="24" rx="24" id="svg_7" cy="31.72548" cx="31.92455" fill="#04c800"/>
+  <g id="svg_8">
+   <path id="svg_1" d="m35.92454,24.72549l-13,0"/>
+   <path id="svg_2" d="m30.92454,31.72549l-8,0"/>
+   <path id="svg_3" d="m30.92454,38.72549l-8,0"/>
+   <path id="svg_4" d="m40.92454,35.72549l0,-11"/>
+   <circle id="svg_5" r="3" cy="35.72549" cx="37.92454"/>
+  </g>
+ </g>
+</svg>
