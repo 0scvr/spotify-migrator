@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
-import { 
-  Music, 
-  ArrowRight, 
-  CheckCircle, 
-  AlertCircle, 
-  Loader2, 
-  Copy, 
+import {
+  Music,
+  ArrowRight,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  Copy,
   LogOut,
   Info,
   ListMusic,
@@ -36,7 +36,7 @@ export default function SpotifyMigrator() {
   // --- STATE ---
   const [step, setStep] = useState(1); // 1: Tokens, 2: Select, 3: Copying, 4: Done
   const [demoMode, setDemoMode] = useState(false);
-  
+
   // Auth State
   const [sourceToken, setSourceToken] = useState('');
   const [targetToken, setTargetToken] = useState('');
@@ -49,7 +49,7 @@ export default function SpotifyMigrator() {
   const [playlists, setPlaylists] = useState([]);
   const [selectedPlaylists, setSelectedPlaylists] = useState<Set<string>>(() => new Set());
   const playlistsContainerRef = useRef<HTMLDivElement>(null);
-  
+
   // Migration State
   const [logs, setLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
@@ -59,8 +59,8 @@ export default function SpotifyMigrator() {
 
   const fetchProfile = async (token: string, type: string) => {
     if (demoMode) {
-      return type === 'source' 
-        ? { id: 'demo_user_1', display_name: 'Alice (Demo)' } 
+      return type === 'source'
+        ? { id: 'demo_user_1', display_name: 'Alice (Demo)' }
         : { id: 'demo_user_2', display_name: 'Bob (Demo)' };
     }
 
@@ -83,13 +83,13 @@ export default function SpotifyMigrator() {
       // Validate tokens by fetching profiles
       const sProfile = await fetchProfile(sourceToken, 'source');
       setSourceProfile(sProfile);
-      
+
       const tProfile = await fetchProfile(targetToken, 'target');
       setTargetProfile(tProfile);
 
       // Fetch playlists for source
       await fetchSourcePlaylists(sourceToken, sProfile.id);
-      
+
       setStep(2);
     } catch (err) {
       if (err instanceof Error) {
@@ -118,30 +118,30 @@ export default function SpotifyMigrator() {
     }
 
     let allPlaylists = [];
-    
-    try {
-        // 1. Fetch Liked Songs Count first
-        try {
-            const likedRes = await fetch(`${SPOTIFY_API_BASE}/me/tracks?limit=1`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (likedRes.ok) {
-                const likedData = await likedRes.json();
-                // Create a special playlist object for Liked Songs
-                allPlaylists.push({
-                    id: '__LIKED_SONGS__',
-                    name: 'Liked Songs',
-                    tracks: { total: likedData.total },
-                    isLikedSongs: true, // Flag to identify this special item
-                    images: []
-                });
-            }
-        } catch (e) {
-            console.warn("Could not fetch liked songs count, skipping.", e);
-        }
 
-        // 2. Fetch User Playlists
-        let url = `${SPOTIFY_API_BASE}/users/${userId}/playlists?limit=50`;
+    try {
+      // 1. Fetch Liked Songs Count first
+      try {
+        const likedRes = await fetch(`${SPOTIFY_API_BASE}/me/tracks?limit=1`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (likedRes.ok) {
+          const likedData = await likedRes.json();
+          // Create a special playlist object for Liked Songs
+          allPlaylists.push({
+            id: '__LIKED_SONGS__',
+            name: 'Liked Songs',
+            tracks: { total: likedData.total },
+            isLikedSongs: true, // Flag to identify this special item
+            images: []
+          });
+        }
+      } catch (e) {
+        console.warn("Could not fetch liked songs count, skipping.", e);
+      }
+
+      // 2. Fetch User Playlists
+      let url = `${SPOTIFY_API_BASE}/users/${userId}/playlists?limit=50`;
       while (url) {
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` }
@@ -151,8 +151,8 @@ export default function SpotifyMigrator() {
         allPlaylists = [...allPlaylists, ...data.items];
         url = data.next;
       }
-        
-        // Filter out nulls
+
+      // Filter out nulls
       setPlaylists(allPlaylists.filter(p => p !== null));
     } catch (err) {
       throw new Error("Could not fetch playlists. Token might verify but lack permissions.");
@@ -207,125 +207,125 @@ export default function SpotifyMigrator() {
         // STRATEGY A: MIGRATE LIKED SONGS
         // ==========================================
         if (playlist.isLikedSongs) {
-             let trackIds = []; // We need IDs for PUT /me/tracks, not URIs
+          let trackIds = []; // We need IDs for PUT /me/tracks, not URIs
 
-             // 1. Fetch Source Liked Songs
-             if (demoMode) {
-                 await wait(800);
-                 trackIds = Array(Math.min(playlist.tracks.total, 50)).fill('demo_track_id');
-                 addLog(`Fetched ${playlist.tracks.total} liked songs from source.`);
-             } else {
-                 let url = `${SPOTIFY_API_BASE}/me/tracks?limit=50`;
-                 while (url) {
-                     const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
-                     const data = await res.json();
-                     // Extract IDs. Note: Liked songs endpoint returns object { track: { id, ... } }
-                     const chunkIds = data.items.map(item => item.track?.id).filter(id => id);
-                     trackIds = [...trackIds, ...chunkIds];
-                     url = data.next;
-                 }
-                 addLog(`Fetched ${trackIds.length} liked songs.`);
-             }
+          // 1. Fetch Source Liked Songs
+          if (demoMode) {
+            await wait(800);
+            trackIds = Array(Math.min(playlist.tracks.total, 50)).fill('demo_track_id');
+            addLog(`Fetched ${playlist.tracks.total} liked songs from source.`);
+          } else {
+            let url = `${SPOTIFY_API_BASE}/me/tracks?limit=50`;
+            while (url) {
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
+              const data = await res.json();
+              // Extract IDs. Note: Liked songs endpoint returns object { track: { id, ... } }
+              const chunkIds = data.items.map(item => item.track?.id).filter(id => id);
+              trackIds = [...trackIds, ...chunkIds];
+              url = data.next;
+            }
+            addLog(`Fetched ${trackIds.length} liked songs.`);
+          }
 
-             // 2. Add to Target Liked Songs
-             if (trackIds.length > 0) {
-                 if (demoMode) {
-                     await wait(500);
-                     addLog(`Added tracks to target Liked Songs.`);
-                 } else {
-                     // The endpoint for saving tracks is PUT /me/tracks.
-                     // It accepts a list of IDs in the body. MAX 50 IDs per request.
-                     const chunks = chunkArray(trackIds, 50); 
-                     for (const [i, chunk] of chunks.entries()) {
-                         await fetch(`${SPOTIFY_API_BASE}/me/tracks`, {
-                             method: 'PUT',
-                             headers: { 
-                                 Authorization: `Bearer ${targetToken}`,
-                                 'Content-Type': 'application/json'
-                             },
-                             body: JSON.stringify({ ids: chunk })
-                         });
-                         // Throttle to avoid rate limits
-                         if (i < chunks.length - 1) await wait(100);
-                     }
-                     addLog(`Successfully saved ${trackIds.length} songs to target library.`);
-                 }
-             } else {
-                 addLog(`No liked songs found to copy.`);
-             }
+          // 2. Add to Target Liked Songs
+          if (trackIds.length > 0) {
+            if (demoMode) {
+              await wait(500);
+              addLog(`Added tracks to target Liked Songs.`);
+            } else {
+              // The endpoint for saving tracks is PUT /me/tracks.
+              // It accepts a list of IDs in the body. MAX 50 IDs per request.
+              const chunks = chunkArray(trackIds, 50);
+              for (const [i, chunk] of chunks.entries()) {
+                await fetch(`${SPOTIFY_API_BASE}/me/tracks`, {
+                  method: 'PUT',
+                  headers: {
+                    Authorization: `Bearer ${targetToken}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ ids: chunk })
+                });
+                // Throttle to avoid rate limits
+                if (i < chunks.length - 1) await wait(100);
+              }
+              addLog(`Successfully saved ${trackIds.length} songs to target library.`);
+            }
+          } else {
+            addLog(`No liked songs found to copy.`);
+          }
 
-        } 
+        }
         // ==========================================
         // STRATEGY B: MIGRATE NORMAL PLAYLIST
         // ==========================================
         else {
-            let uris: string[] = [];
-        
-        // 1. Fetch Tracks (Source)
-        if (demoMode) {
-          await wait(800); // Simulate network
-          uris = Array(Math.min(playlist.tracks.total, 50)).fill('spotify:track:demo'); 
-          addLog(`Fetched ${playlist.tracks.total} tracks from source.`);
-        } else {
-          let url = playlist.tracks.href;
-          while (url) {
-            const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
-            const data = await res.json();
-            // Extract URIs, filtering out local tracks (which have no URI)
-            const chunkUris = data.items.map(item => item.track?.uri).filter((uri: string) => uri && uri.includes('spotify:track'));
-            uris = [...uris, ...chunkUris];
-            url = data.next;
+          let uris: string[] = [];
+
+          // 1. Fetch Tracks (Source)
+          if (demoMode) {
+            await wait(800); // Simulate network
+            uris = Array(Math.min(playlist.tracks.total, 50)).fill('spotify:track:demo');
+            addLog(`Fetched ${playlist.tracks.total} tracks from source.`);
+          } else {
+            let url = playlist.tracks.href;
+            while (url) {
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
+              const data = await res.json();
+              // Extract URIs, filtering out local tracks (which have no URI)
+              const chunkUris = data.items.map(item => item.track?.uri).filter((uri: string) => uri && uri.includes('spotify:track'));
+              uris = [...uris, ...chunkUris];
+              url = data.next;
+            }
+            addLog(`Fetched ${uris.length} tracks.`);
           }
-          addLog(`Fetched ${uris.length} tracks.`);
-        }
 
-        // 2. Create Playlist (Target)
-        let newPlaylistId;
-        if (demoMode) {
-          await wait(500);
-          newPlaylistId = 'demo_new_id';
-          addLog(`Created playlist "${playlist.name}" on target account.`);
-        } else {
-          const playlistDescription = playlist.description?.trim() ? playlist.description : `Copied from ${sourceProfile.display_name} via Spotify Migrator`;
-          const createRes = await fetch(`${SPOTIFY_API_BASE}/users/${targetProfile.id}/playlists`, {
-            method: 'POST',
-            headers: { 
-              Authorization: `Bearer ${targetToken}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              name: playlist.name,
-              description: playlistDescription,
-              public: false
-            })
-          });
-          const createData = await createRes.json();
-          newPlaylistId = createData.id;
-          addLog(`Created playlist "${playlist.name}" on target account.`);
-        }
-
-        // 3. Add Tracks (Target)
-        if (uris.length > 0) {
+          // 2. Create Playlist (Target)
+          let newPlaylistId;
           if (demoMode) {
             await wait(500);
-            addLog(`Added tracks to target playlist.`);
+            newPlaylistId = 'demo_new_id';
+            addLog(`Created playlist "${playlist.name}" on target account.`);
           } else {
-            const chunks = chunkArray(uris, 100);
-            for (const chunk of chunks) {
-              await fetch(`${SPOTIFY_API_BASE}/playlists/${newPlaylistId}/tracks`, {
-                method: 'POST',
-                headers: { 
-                  Authorization: `Bearer ${targetToken}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ uris: chunk })
-              });
-            }
-            addLog(`Successfully added ${uris.length} tracks.`);
+            const playlistDescription = playlist.description?.trim() ? playlist.description : `Copied from ${sourceProfile.display_name} via Spotify Migrator`;
+            const createRes = await fetch(`${SPOTIFY_API_BASE}/users/${targetProfile.id}/playlists`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${targetToken}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                name: playlist.name,
+                description: playlistDescription,
+                public: false
+              })
+            });
+            const createData = await createRes.json();
+            newPlaylistId = createData.id;
+            addLog(`Created playlist "${playlist.name}" on target account.`);
           }
-        } else {
-          addLog(`Skipping track addition: No valid tracks found.`);
+
+          // 3. Add Tracks (Target)
+          if (uris.length > 0) {
+            if (demoMode) {
+              await wait(500);
+              addLog(`Added tracks to target playlist.`);
+            } else {
+              const chunks = chunkArray(uris, 100);
+              for (const chunk of chunks) {
+                await fetch(`${SPOTIFY_API_BASE}/playlists/${newPlaylistId}/tracks`, {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${targetToken}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ uris: chunk })
+                });
+              }
+              addLog(`Successfully added ${uris.length} tracks.`);
             }
+          } else {
+            addLog(`Skipping track addition: No valid tracks found.`);
+          }
         }
 
       } catch (err) {
@@ -380,11 +380,11 @@ export default function SpotifyMigrator() {
         <div className="space-y-2">
           <label className="text-sm font-medium text-slate-300">Target Account Token</label>
           <textarea
-             value={targetToken}
-             onChange={(e) => setTargetToken(e.target.value)}
-             disabled={demoMode}
-             placeholder={demoMode ? "Demo Mode Active" : "Paste token from Account B..."}
-             className="w-full h-32 p-3 bg-slate-900 border border-slate-700 rounded-md text-xs font-mono text-slate-300 focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none resize-none disabled:opacity-50"
+            value={targetToken}
+            onChange={(e) => setTargetToken(e.target.value)}
+            disabled={demoMode}
+            placeholder={demoMode ? "Demo Mode Active" : "Paste token from Account B..."}
+            className="w-full h-32 p-3 bg-slate-900 border border-slate-700 rounded-md text-xs font-mono text-slate-300 focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none resize-none disabled:opacity-50"
           />
         </div>
       </div>
@@ -398,16 +398,16 @@ export default function SpotifyMigrator() {
 
       <div className="flex items-center justify-between pt-4">
         <label className="flex items-center gap-2 cursor-pointer group">
-          <input 
+          <input
             id='demoCheckBox'
-            type="checkbox" 
-            checked={demoMode} 
+            type="checkbox"
+            checked={demoMode}
             onChange={(e) => {
               setDemoMode(e.target.checked);
               setSourceToken(e.target.checked ? 'demo' : '');
               setTargetToken(e.target.checked ? 'demo' : '');
             }}
-            className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-green-500 focus:ring-green-500" 
+            className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-green-500 focus:ring-green-500"
           />
           <span className="text-sm text-slate-400 group-hover:text-slate-200 transition-colors">Use Demo Mode (No tokens needed)</span>
         </label>
@@ -448,7 +448,7 @@ export default function SpotifyMigrator() {
             </div>
           </div>
         </div>
-        <button 
+        <button
           onClick={() => setStep(1)}
           className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
         >
@@ -458,7 +458,7 @@ export default function SpotifyMigrator() {
 
       <div className="flex items-center justify-between py-2">
         <h2 className="text-xl font-semibold text-white">Select Playlists</h2>
-        <button 
+        <button
           onClick={selectAll}
           className="text-sm text-green-400 hover:text-green-300 font-medium"
         >
@@ -474,7 +474,7 @@ export default function SpotifyMigrator() {
           <div className="p-8 text-center text-slate-500">No playlists found on source account.</div>
         ) : (
           playlists.map(p => (
-            <div 
+            <div
               key={p.id}
               onClick={() => toggleSelection(p.id)}
               className={`p-4 flex items-center gap-4 cursor-pointer border-b border-slate-800 transition-colors hover:bg-slate-800/50 ${selectedPlaylists.has(p.id) ? 'bg-slate-800' : ''}`}
@@ -482,26 +482,26 @@ export default function SpotifyMigrator() {
               <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedPlaylists.has(p.id) ? 'bg-green-500 border-green-500' : 'border-slate-600'}`}>
                 {selectedPlaylists.has(p.id) && <CheckCircle className="w-3.5 h-3.5 text-black" />}
               </div>
-              
-                {/* Special Render for Liked Songs */}
-                {p.isLikedSongs ? (
-                     <div className="w-12 h-12 rounded bg-gradient-to-br from-purple-700 to-blue-600 flex items-center justify-center">
-                       <Heart className="w-6 h-6 text-white fill-current" />
-                     </div>
-                ) : (
-                    // Standard Playlist Render
-                    p.images?.[0]?.url ? (
-                <img src={p.images[0].url} alt="" className="w-12 h-12 rounded bg-slate-800 object-cover" />
-              ) : (
-                <div className="w-12 h-12 rounded bg-slate-800 flex items-center justify-center">
-                  <Music className="w-6 h-6 text-slate-600" />
+
+              {/* Special Render for Liked Songs */}
+              {p.isLikedSongs ? (
+                <div className="w-12 h-12 rounded bg-gradient-to-br from-purple-700 to-blue-600 flex items-center justify-center">
+                  <Heart className="w-6 h-6 text-white fill-current" />
                 </div>
-                    )
+              ) : (
+                // Standard Playlist Render
+                p.images?.[0]?.url ? (
+                  <img src={p.images[0].url} alt="" className="w-12 h-12 rounded bg-slate-800 object-cover" />
+                ) : (
+                  <div className="w-12 h-12 rounded bg-slate-800 flex items-center justify-center">
+                    <Music className="w-6 h-6 text-slate-600" />
+                  </div>
+                )
               )}
-              
+
               <div className="flex-1">
                 <div className="font-medium text-slate-200">{p.name}</div>
-                  <div className="text-sm text-slate-500">{p.tracks.total} tracks {p.isLikedSongs && '(Saved Tracks)'}</div>
+                <div className="text-sm text-slate-500">{p.tracks.total} tracks {p.isLikedSongs && '(Saved Tracks)'}</div>
               </div>
             </div>
           ))
@@ -530,7 +530,7 @@ export default function SpotifyMigrator() {
       </div>
 
       <div className="bg-slate-800 rounded-full h-4 overflow-hidden border border-slate-700">
-        <div 
+        <div
           className="h-full bg-green-500 transition-all duration-500 ease-out"
           style={{ width: `${progress}%` }}
         />
@@ -550,7 +550,7 @@ export default function SpotifyMigrator() {
       <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto">
         <CheckCircle className="w-10 h-10 text-green-500" />
       </div>
-      
+
       <div>
         <h2 className="text-3xl font-bold text-white mb-2">Transfer Complete!</h2>
         <p className="text-slate-400">
@@ -578,9 +578,9 @@ export default function SpotifyMigrator() {
       </div>
 
       <div className="pt-8 border-t border-slate-800 mt-8">
-        <a 
-          href="https://github.com/0scvr/spotify-migrator" 
-          target="_blank" 
+        <a
+          href="https://github.com/0scvr/spotify-migrator"
+          target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm"
         >
@@ -593,7 +593,7 @@ export default function SpotifyMigrator() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col font-sans selection:bg-green-500/30">
-      
+
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -611,11 +611,11 @@ export default function SpotifyMigrator() {
 
       {/* Main Content */}
       <main className="flex-1 w-full max-w-3xl mx-auto px-6 py-8">
-        
+
         {/* Progress Stepper */}
         <div className="flex items-center justify-between mb-12 relative">
           <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-0.5 bg-slate-800 -z-10" />
-          
+
           {[
             { num: 1, label: 'Connect' },
             { num: 2, label: 'Select' },
@@ -626,7 +626,7 @@ export default function SpotifyMigrator() {
             const isCurrent = step === s.num;
             return (
               <div key={s.num} className="flex flex-col items-center gap-2 bg-slate-950 px-2">
-                <div 
+                <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300
                     ${isActive ? 'bg-green-500 text-black scale-110' : 'bg-slate-800 text-slate-500'}
                     ${isCurrent ? 'ring-4 ring-green-500/20' : ''}
