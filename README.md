@@ -2,6 +2,10 @@
 
 Spotify Migrator is a browser-first app for copying playlists between two Spotify accounts. It runs purely in the browser with no backend and lets you paste OAuth tokens from Spotify's Web API console or switch to demo mode for offline preview data.
 
+## Using the Hosted Version
+
+The easiest way to use this tool is by using the hosted version here: https://spotify-migrator.5xp395ab.workers.dev/
+
 ## Getting started
 
 ```bash
