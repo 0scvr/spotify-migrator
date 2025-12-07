@@ -9,7 +9,9 @@ import {
   LogOut,
   Info,
   ListMusic,
-  User
+  User,
+  Github,
+  Heart
 } from 'lucide-react';
 
 /**
@@ -103,6 +105,7 @@ export default function SpotifyMigrator() {
   const fetchSourcePlaylists = async (token: string, userId: any) => {
     if (demoMode) {
       setPlaylists([
+        { id: '__LIKED_SONGS__', name: 'Liked Songs', tracks: { total: 154 }, isLikedSongs: true, images: [] }, // Demo Liked Songs
         { id: '1', name: 'Summer Vibes 2024', tracks: { total: 45 }, images: [] },
         { id: '2', name: 'Coding Focus', tracks: { total: 120 }, images: [] },
         { id: '3', name: 'Workout Mix', tracks: { total: 32 }, images: [] },
@@ -115,9 +118,30 @@ export default function SpotifyMigrator() {
     }
 
     let allPlaylists = [];
-    let url = `${SPOTIFY_API_BASE}/users/${userId}/playlists?limit=50`;
-
+    
     try {
+        // 1. Fetch Liked Songs Count first
+        try {
+            const likedRes = await fetch(`${SPOTIFY_API_BASE}/me/tracks?limit=1`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (likedRes.ok) {
+                const likedData = await likedRes.json();
+                // Create a special playlist object for Liked Songs
+                allPlaylists.push({
+                    id: '__LIKED_SONGS__',
+                    name: 'Liked Songs',
+                    tracks: { total: likedData.total },
+                    isLikedSongs: true, // Flag to identify this special item
+                    images: []
+                });
+            }
+        } catch (e) {
+            console.warn("Could not fetch liked songs count, skipping.", e);
+        }
+
+        // 2. Fetch User Playlists
+        let url = `${SPOTIFY_API_BASE}/users/${userId}/playlists?limit=50`;
       while (url) {
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` }
@@ -127,8 +151,8 @@ export default function SpotifyMigrator() {
         allPlaylists = [...allPlaylists, ...data.items];
         url = data.next;
       }
-      // Filter out nulls and strictly verify ownership if needed, 
-      // but usually we want to copy any playlist the user follows/owns.
+        
+        // Filter out nulls
       setPlaylists(allPlaylists.filter(p => p !== null));
     } catch (err) {
       throw new Error("Could not fetch playlists. Token might verify but lack permissions.");
@@ -179,7 +203,63 @@ export default function SpotifyMigrator() {
       addLog(`Starting migration for: ${playlist.name}`);
 
       try {
-        let uris = [];
+        // ==========================================
+        // STRATEGY A: MIGRATE LIKED SONGS
+        // ==========================================
+        if (playlist.isLikedSongs) {
+             let trackIds = []; // We need IDs for PUT /me/tracks, not URIs
+
+             // 1. Fetch Source Liked Songs
+             if (demoMode) {
+                 await wait(800);
+                 trackIds = Array(Math.min(playlist.tracks.total, 50)).fill('demo_track_id');
+                 addLog(`Fetched ${playlist.tracks.total} liked songs from source.`);
+             } else {
+                 let url = `${SPOTIFY_API_BASE}/me/tracks?limit=50`;
+                 while (url) {
+                     const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
+                     const data = await res.json();
+                     // Extract IDs. Note: Liked songs endpoint returns object { track: { id, ... } }
+                     const chunkIds = data.items.map(item => item.track?.id).filter(id => id);
+                     trackIds = [...trackIds, ...chunkIds];
+                     url = data.next;
+                 }
+                 addLog(`Fetched ${trackIds.length} liked songs.`);
+             }
+
+             // 2. Add to Target Liked Songs
+             if (trackIds.length > 0) {
+                 if (demoMode) {
+                     await wait(500);
+                     addLog(`Added tracks to target Liked Songs.`);
+                 } else {
+                     // The endpoint for saving tracks is PUT /me/tracks.
+                     // It accepts a list of IDs in the body. MAX 50 IDs per request.
+                     const chunks = chunkArray(trackIds, 50); 
+                     for (const [i, chunk] of chunks.entries()) {
+                         await fetch(`${SPOTIFY_API_BASE}/me/tracks`, {
+                             method: 'PUT',
+                             headers: { 
+                                 Authorization: `Bearer ${targetToken}`,
+                                 'Content-Type': 'application/json'
+                             },
+                             body: JSON.stringify({ ids: chunk })
+                         });
+                         // Throttle to avoid rate limits
+                         if (i < chunks.length - 1) await wait(100);
+                     }
+                     addLog(`Successfully saved ${trackIds.length} songs to target library.`);
+                 }
+             } else {
+                 addLog(`No liked songs found to copy.`);
+             }
+
+        } 
+        // ==========================================
+        // STRATEGY B: MIGRATE NORMAL PLAYLIST
+        // ==========================================
+        else {
+            let uris: string[] = [];
         
         // 1. Fetch Tracks (Source)
         if (demoMode) {
@@ -192,7 +272,7 @@ export default function SpotifyMigrator() {
             const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
             const data = await res.json();
             // Extract URIs, filtering out local tracks (which have no URI)
-            const chunkUris = data.items.map(item => item.track?.uri).filter(uri => uri && uri.includes('spotify:track'));
+            const chunkUris = data.items.map(item => item.track?.uri).filter((uri: string) => uri && uri.includes('spotify:track'));
             uris = [...uris, ...chunkUris];
             url = data.next;
           }
@@ -245,6 +325,7 @@ export default function SpotifyMigrator() {
           }
         } else {
           addLog(`Skipping track addition: No valid tracks found.`);
+            }
         }
 
       } catch (err) {
@@ -270,13 +351,15 @@ export default function SpotifyMigrator() {
           How to get tokens
         </h3>
         <p className="text-sm text-slate-400 mb-2">
-          Because this tool runs entirely in your browser without a backend server, you need to manually provide access tokens.
+          To copy Playlists & Liked Songs, you need the following permissions:
         </p>
+        <ul className="list-disc list-inside text-sm text-slate-400 space-y-1 ml-1 mb-2">
+          <li><strong>Source:</strong> <code>playlist-read-private</code>, <code>user-library-read</code>, <code>playlist-read-collaborative</code></li>
+          <li><strong>Target:</strong> <code>playlist-modify-public</code>, <code>playlist-modify-private</code>, <code>user-library-modify</code></li>
+        </ul>
         <ol className="list-decimal list-inside text-sm text-slate-400 space-y-1 ml-1">
-          <li>Go to the <a href="https://developer.spotify.com/console/get-current-user-playlists/" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Spotify Web API Console</a>.</li>
-          <li>Click "Get Token" (check <code>playlist-read-private</code>, <code>playlist-modify-public</code>, <code>playlist-modify-private</code>).</li>
-          <li>Copy the OAuth Token generated.</li>
-          <li>Repeat for the target account (you may need to use an Incognito window to log in to the second account).</li>
+          <li>The simplest way to get your access tokens is to use <a href="https://github.com/0scvr/spotify-access-token" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">this utility script</a> that automates the login process. (Recommended)</li>
+          <li>Alternatively you can follow <a href="https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Spotify for Developers</a> to generate your auth tokens yourself.</li>
         </ol>
       </div>
 
@@ -400,17 +483,25 @@ export default function SpotifyMigrator() {
                 {selectedPlaylists.has(p.id) && <CheckCircle className="w-3.5 h-3.5 text-black" />}
               </div>
               
-              {p.images?.[0]?.url ? (
+                {/* Special Render for Liked Songs */}
+                {p.isLikedSongs ? (
+                     <div className="w-12 h-12 rounded bg-gradient-to-br from-purple-700 to-blue-600 flex items-center justify-center">
+                       <Heart className="w-6 h-6 text-white fill-current" />
+                     </div>
+                ) : (
+                    // Standard Playlist Render
+                    p.images?.[0]?.url ? (
                 <img src={p.images[0].url} alt="" className="w-12 h-12 rounded bg-slate-800 object-cover" />
               ) : (
                 <div className="w-12 h-12 rounded bg-slate-800 flex items-center justify-center">
                   <Music className="w-6 h-6 text-slate-600" />
                 </div>
+                    )
               )}
               
               <div className="flex-1">
                 <div className="font-medium text-slate-200">{p.name}</div>
-                <div className="text-sm text-slate-500">{p.tracks.total} tracks</div>
+                  <div className="text-sm text-slate-500">{p.tracks.total} tracks {p.isLikedSongs && '(Saved Tracks)'}</div>
               </div>
             </div>
           ))
@@ -463,7 +554,7 @@ export default function SpotifyMigrator() {
       <div>
         <h2 className="text-3xl font-bold text-white mb-2">Transfer Complete!</h2>
         <p className="text-slate-400">
-          Successfully migrated {selectedPlaylists.size} playlists to {targetProfile?.display_name}.
+          Successfully migrated {selectedPlaylists.size} items to {targetProfile?.display_name}.
         </p>
       </div>
 
@@ -485,6 +576,18 @@ export default function SpotifyMigrator() {
           Start Over
         </button>
       </div>
+
+      <div className="pt-8 border-t border-slate-800 mt-8">
+        <a 
+          href="https://github.com/0scvr/spotify-migrator" 
+          target="_blank" 
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm"
+        >
+          <Github className="w-4 h-4" />
+          <span>Star this project on GitHub</span>
+        </a>
+      </div>
     </div>
   );
 
@@ -501,7 +604,7 @@ export default function SpotifyMigrator() {
             <h1 className="text-xl font-bold text-white tracking-tight">Spotify Migrator</h1>
           </div>
           <div className="text-xs font-mono text-slate-500 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
-            v1.0.0
+            v1.1.0
           </div>
         </div>
       </header>
