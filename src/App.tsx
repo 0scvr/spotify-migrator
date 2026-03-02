@@ -603,19 +603,19 @@ export default function SpotifyMigrator() {
       <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
         <h3 className="font-semibold text-slate-200 mb-2 flex items-center gap-2">
           <Info className="w-4 h-4 text-sky-400" />
-          How to get your auth tokens
+          How to use Spotify Migrator
         </h3>
-        <p className="text-sm text-slate-400 mb-2">
-          To copy Playlists & Liked Songs & Followed Artists, you need the following permissions:
-        </p>
-        <ul className="list-disc list-inside text-sm text-slate-400 space-y-1 ml-1 mb-2">
-          <li><strong>Source:</strong> <code>playlist-read-private</code>, <code>user-library-read</code>, <code>playlist-read-collaborative</code>, <code>user-follow-read</code></li>
-          <li><strong>Target:</strong> <code>playlist-modify-public</code>, <code>playlist-modify-private</code>, <code>user-library-modify</code></li>
-        </ul>
-        <ol className="list-decimal list-inside text-sm text-slate-400 space-y-1 ml-1">
-          <li>The simplest way to get your access tokens is to use <a href="https://github.com/0scvr/spotify-access-token" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">this utility script</a> that automates the login process. (Recommended)</li>
-          <li>Alternatively you can follow <a href="https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Spotify for Developers</a> to generate your auth tokens yourself.</li>
+        <ol className="list-decimal list-inside text-sm text-slate-400 space-y-2 ml-1">
+          <li>Get your access tokens from Spotify for the source and target accounts:</li>
+          <ul className='list-disc list-inside text-sm text-slate-400 space-y-1 ml-4'>
+            <li>Recommended way is to use <a href="https://github.com/0scvr/spotify-access-token" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">this utility script</a> that automates the authentication process.</li>
+            <li>Alternatively you can follow <a href="https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Spotify PKCE flow tutorial</a> to generate your auth tokens manually.</li>
+          </ul>
+          <li>Select the playlists and followed artists you want to copy.</li>
+          <li>Wait for the migration to complete.</li>
+          <li>Enjoy your songs and artists on your target account ;)</li>
         </ol>
+  
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
