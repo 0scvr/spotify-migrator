@@ -15,8 +15,8 @@ pnpm dev
 
 1. Open the local dev server (`http://localhost:5173` by default) to view the app.
 2. Paste the access tokens for the source and target Spotify accounts into the two text areas. To copy Playlists & Liked Songs, you need the following permissions:
-	- Source: `playlist-read-private`, `user-library-read`, `playlist-read-collaborative`
-    - Target: `playlist-modify-public`, `playlist-modify-private`, `user-library-modify`<br>
+	- Source: `playlist-read-private user-library-read playlist-read-collaborative user-read-private user-follow-read`
+    - Target: `playlist-modify-public playlist-modify-private user-library-modify user-follow-modify`<br>
 
     The simplest way to get your access tokens is to use [this utility script](https://github.com/0scvr/spotify-access-token) I made that automates the login process. <br>Alternatively you can follow <a href="https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow" target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">Spotify for Developers</a> to generate your auth tokens yourself. Use a private/incognito window when swapping accounts to avoid session conflicts.
 3. Click **Connect Accounts**. The app will fetch your playlists, let you select which ones to copy, and then migrate them to the destination account.
