@@ -32,6 +32,59 @@ const chunkArray = (array: any[], size: number) => {
   return chunked;
 };
 
+type DemoUserProfile = {
+  id: string;
+  display_name: string;
+};
+type SpotifyUserProfile = {
+  display_name: string;
+  external_urls: { spotify: string };
+  href: string;
+  id: string;
+  images: Image[];
+  uri: string;
+};
+
+type DemoPlaylist = {
+  id: string;
+  images: Image[];
+  name: string;
+  isLikedSongs?: boolean;
+  items: {
+    total: number;
+  };
+};
+
+type SpotifyPlaylistsResponse = {
+  next: string | null;
+  total: number;
+  items: Playlist[];
+};
+
+type Playlist = {
+  collaborative: boolean;
+  description: string;
+  external_urls: { spotify: string };
+  id: string;
+  images: Image[];
+  name: string;
+  owner: { display_name: string };
+  public: boolean;
+  snapshot_id: string;
+  items: {
+    href: string;
+    total: number;
+  };
+  uri: string;
+  isLikedSongs?: boolean;
+};
+
+type Image = {
+  height: number;
+  url: string;
+  width: number;
+}
+
 export default function SpotifyMigrator() {
   // --- STATE ---
   const [step, setStep] = useState(1); // 1: Tokens, 2: Select, 3: Copying, 4: Done
@@ -40,13 +93,13 @@ export default function SpotifyMigrator() {
   // Auth State
   const [sourceToken, setSourceToken] = useState('');
   const [targetToken, setTargetToken] = useState('');
-  const [sourceProfile, setSourceProfile] = useState(null);
-  const [targetProfile, setTargetProfile] = useState(null);
+  const [sourceProfile, setSourceProfile] = useState<SpotifyUserProfile | DemoUserProfile | null>(null);
+  const [targetProfile, setTargetProfile] = useState<SpotifyUserProfile | DemoUserProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Data State
-  const [playlists, setPlaylists] = useState([]);
+  const [playlists, setPlaylists] = useState<(Playlist | DemoPlaylist)[]>([]);
   const [selectedPlaylists, setSelectedPlaylists] = useState<Set<string>>(() => new Set());
   const playlistsContainerRef = useRef<HTMLDivElement>(null);
 
@@ -54,10 +107,9 @@ export default function SpotifyMigrator() {
   const [logs, setLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
   const [currentAction, setCurrentAction] = useState('');
+  const [migrationErrors, setMigrationErrors] = useState(0);
 
-  // --- ACTIONS ---
-
-  const fetchProfile = async (token: string, type: string) => {
+  const fetchProfile = async (token: string, type: string): Promise<DemoUserProfile | SpotifyUserProfile> => {
     if (demoMode) {
       return type === 'source'
         ? { id: 'demo_user_1', display_name: 'Alice (Demo)' }
@@ -88,7 +140,7 @@ export default function SpotifyMigrator() {
       setTargetProfile(tProfile);
 
       // Fetch playlists for source
-      await fetchSourcePlaylists(sourceToken, sProfile.id);
+      await fetchSourcePlaylists(sourceToken);
 
       setStep(2);
     } catch (err) {
@@ -102,22 +154,22 @@ export default function SpotifyMigrator() {
     }
   };
 
-  const fetchSourcePlaylists = async (token: string, userId: any) => {
+  const fetchSourcePlaylists = async (token: string) => {
     if (demoMode) {
       setPlaylists([
-        { id: '__LIKED_SONGS__', name: 'Liked Songs', tracks: { total: 154 }, isLikedSongs: true, images: [] }, // Demo Liked Songs
-        { id: '1', name: 'Summer Vibes 2024', tracks: { total: 45 }, images: [] },
-        { id: '2', name: 'Coding Focus', tracks: { total: 120 }, images: [] },
-        { id: '3', name: 'Workout Mix', tracks: { total: 32 }, images: [] },
-        { id: '4', name: 'Sad Boi Hours', tracks: { total: 15 }, images: [] },
-        { id: '5', name: 'Cowboy songs 2025', tracks: { total: 57 }, images: [] },
-        { id: '6', name: 'Late night driving', tracks: { total: 9 }, images: [] },
-        { id: '7', name: 'Road Trip', tracks: { total: 88 }, images: [] },
+        { id: '__LIKED_SONGS__', name: 'Liked Songs', items: { total: 154 }, isLikedSongs: true, images: [] }, // Demo Liked Songs
+        { id: '1', name: 'Summer Vibes 2024', items: { total: 45 }, images: [] },
+        { id: '2', name: 'Coding Focus', items: { total: 120 }, images: [] },
+        { id: '3', name: 'Workout Mix', items: { total: 32 }, images: [] },
+        { id: '4', name: 'Sad Boi Hours', items: { total: 15 }, images: [] },
+        { id: '5', name: 'Cowboy songs 2025', items: { total: 57 }, images: [] },
+        { id: '6', name: 'Late night driving', items: { total: 9 }, images: [] },
+        { id: '7', name: 'Road Trip', items: { total: 88 }, images: [] },
       ]);
       return;
     }
 
-    let allPlaylists = [];
+    let allPlaylists: (Playlist | DemoPlaylist)[] = [];
 
     try {
       // 1. Fetch Liked Songs Count first
@@ -131,7 +183,7 @@ export default function SpotifyMigrator() {
           allPlaylists.push({
             id: '__LIKED_SONGS__',
             name: 'Liked Songs',
-            tracks: { total: likedData.total },
+            items: { total: likedData.total },
             isLikedSongs: true, // Flag to identify this special item
             images: []
           });
@@ -141,13 +193,13 @@ export default function SpotifyMigrator() {
       }
 
       // 2. Fetch User Playlists
-      let url = `${SPOTIFY_API_BASE}/users/${userId}/playlists?limit=50`;
+      let url = `${SPOTIFY_API_BASE}/me/playlists?limit=50`;
       while (url) {
         const res = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!res.ok) throw new Error("Failed to fetch playlists");
-        const data = await res.json();
+        const data: SpotifyPlaylistsResponse = await res.json();
         allPlaylists = [...allPlaylists, ...data.items];
         url = data.next;
       }
@@ -193,8 +245,10 @@ export default function SpotifyMigrator() {
     setStep(3);
     setLogs([]);
     setProgress(0);
+    setMigrationErrors(0);
     const total = selectedPlaylists.size;
     let completed = 0;
+    let totalErrors = 0;
 
     const playlistsToCopy = playlists.filter(p => selectedPlaylists.has(p.id));
 
@@ -207,48 +261,59 @@ export default function SpotifyMigrator() {
         // STRATEGY A: MIGRATE LIKED SONGS
         // ==========================================
         if (playlist.isLikedSongs) {
-          let trackIds = []; // We need IDs for PUT /me/tracks, not URIs
+          let trackUris: string[] = []; // URIs for PUT /me/library
 
           // 1. Fetch Source Liked Songs
           if (demoMode) {
             await wait(800);
-            trackIds = Array(Math.min(playlist.tracks.total, 50)).fill('demo_track_id');
-            addLog(`Fetched ${playlist.tracks.total} liked songs from source.`);
+            trackUris = Array(Math.min(playlist.items.total, 50)).fill('spotify:track:demo_track_id');
+            addLog(`Fetched ${playlist.items.total} liked songs from source.`);
           } else {
             let url = `${SPOTIFY_API_BASE}/me/tracks?limit=50`;
             while (url) {
               const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
+              if (!res.ok) {
+                addLog(`ERROR: Failed to fetch liked songs (HTTP ${res.status}). Stopping fetch.`);
+                totalErrors++;
+                break;
+              }
               const data = await res.json();
-              // Extract IDs. Note: Liked songs endpoint returns object { track: { id, ... } }
-              const chunkIds = data.items.map(item => item.track?.id).filter(id => id);
-              trackIds = [...trackIds, ...chunkIds];
+              // Extract URIs. Liked songs endpoint returns object { track: { uri, ... } }
+              const chunkUris = data.items.map((item: { track: { uri: string; }; }) => item.track?.uri).filter((uri: string) => uri && uri.includes('spotify:track'));
+              trackUris = [...trackUris, ...chunkUris];
               url = data.next;
             }
-            addLog(`Fetched ${trackIds.length} liked songs.`);
+            addLog(`Fetched ${trackUris.length} liked songs.`);
           }
 
           // 2. Add to Target Liked Songs
-          if (trackIds.length > 0) {
+          if (trackUris.length > 0) {
             if (demoMode) {
               await wait(500);
               addLog(`Added tracks to target Liked Songs.`);
             } else {
-              // The endpoint for saving tracks is PUT /me/tracks.
-              // It accepts a list of IDs in the body. MAX 50 IDs per request.
-              const chunks = chunkArray(trackIds, 50);
+              // The endpoint for saving items is PUT /me/library.
+              // It accepts a comma-separated list of URIs as a query param. MAX 40 per request.
+              const chunks = chunkArray(trackUris, 40);
+              let savedCount = 0;
               for (const [i, chunk] of chunks.entries()) {
-                await fetch(`${SPOTIFY_API_BASE}/me/tracks`, {
+                const urisParam = chunk.join(',');
+                const saveRes = await fetch(`${SPOTIFY_API_BASE}/me/library?uris=${encodeURIComponent(urisParam)}`, {
                   method: 'PUT',
                   headers: {
-                    Authorization: `Bearer ${targetToken}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({ ids: chunk })
+                    Authorization: `Bearer ${targetToken}`
+                  }
                 });
+                if (!saveRes.ok) {
+                  addLog(`ERROR: Failed to save chunk ${i + 1}/${chunks.length} to library (HTTP ${saveRes.status}).`);
+                  totalErrors++;
+                } else {
+                  savedCount += chunk.length;
+                }
                 // Throttle to avoid rate limits
                 if (i < chunks.length - 1) await wait(100);
               }
-              addLog(`Successfully saved ${trackIds.length} songs to target library.`);
+              addLog(`Saved ${savedCount}/${trackUris.length} songs to target library.`);
             }
           } else {
             addLog(`No liked songs found to copy.`);
@@ -264,19 +329,28 @@ export default function SpotifyMigrator() {
           // 1. Fetch Tracks (Source)
           if (demoMode) {
             await wait(800); // Simulate network
-            uris = Array(Math.min(playlist.tracks.total, 50)).fill('spotify:track:demo');
-            addLog(`Fetched ${playlist.tracks.total} tracks from source.`);
+            uris = Array(Math.min(playlist.items.total, 50)).fill('spotify:track:demo');
+            addLog(`Fetched ${playlist.items.total} tracks from source.`);
           } else {
-            let url = playlist.tracks.href;
-            while (url) {
-              const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
-              const data = await res.json();
-              // Extract URIs, filtering out local tracks (which have no URI)
-              const chunkUris = data.items.map(item => item.track?.uri).filter((uri: string) => uri && uri.includes('spotify:track'));
-              uris = [...uris, ...chunkUris];
-              url = data.next;
+            if ('href' in playlist.items) {
+              let url = `${playlist.items.href}?fields=${encodeURIComponent("total,next,items(track(name,uri)")}`;
+
+              while (url) {
+                const res = await fetch(url, { headers: { Authorization: `Bearer ${sourceToken}` } });
+                if (!res.ok) {
+                  addLog(`ERROR: Failed to fetch playlist tracks (HTTP ${res.status}). Stopping fetch.`);
+                  totalErrors++;
+                  break;
+                }
+                const data: { total: number, next: string, items: { track: { name: string, uri: string } }[] } = await res.json();
+                // Extract URIs, filtering out local tracks (which have no URI)
+                // Note: field renamed from .track to .item per Feb 2026 API changes
+                const chunkUris = data.items.map((item) => item.track?.uri).filter((uri: string) => uri && uri.includes('spotify:track'));
+                uris = [...uris, ...chunkUris];
+                url = data.next;
+              }
+              addLog(`Fetched ${uris.length} tracks.`);
             }
-            addLog(`Fetched ${uris.length} tracks.`);
           }
 
           // 2. Create Playlist (Target)
@@ -286,8 +360,8 @@ export default function SpotifyMigrator() {
             newPlaylistId = 'demo_new_id';
             addLog(`Created playlist "${playlist.name}" on target account.`);
           } else {
-            const playlistDescription = playlist.description?.trim() ? playlist.description : `Copied from ${sourceProfile.display_name} via Spotify Migrator`;
-            const createRes = await fetch(`${SPOTIFY_API_BASE}/users/${targetProfile.id}/playlists`, {
+            const playlistDescription = 'description' in playlist && playlist.description?.trim() ? playlist.description : `Copied from ${sourceProfile.display_name} via Spotify Migrator`;
+            const createRes = await fetch(`${SPOTIFY_API_BASE}/me/playlists`, {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${targetToken}`,
@@ -299,6 +373,14 @@ export default function SpotifyMigrator() {
                 public: false
               })
             });
+            if (!createRes.ok) {
+              const errText = await createRes.text();
+              addLog(`ERROR: Failed to create playlist "${playlist.name}" (HTTP ${createRes.status}): ${errText}`);
+              totalErrors++;
+              completed++;
+              setProgress((completed / total) * 100);
+              continue;
+            }
             const createData = await createRes.json();
             newPlaylistId = createData.id;
             addLog(`Created playlist "${playlist.name}" on target account.`);
@@ -311,8 +393,9 @@ export default function SpotifyMigrator() {
               addLog(`Added tracks to target playlist.`);
             } else {
               const chunks = chunkArray(uris, 100);
-              for (const chunk of chunks) {
-                await fetch(`${SPOTIFY_API_BASE}/playlists/${newPlaylistId}/tracks`, {
+              let addedCount = 0;
+              for (const [i, chunk] of chunks.entries()) {
+                const addRes = await fetch(`${SPOTIFY_API_BASE}/playlists/${newPlaylistId}/items`, {
                   method: 'POST',
                   headers: {
                     Authorization: `Bearer ${targetToken}`,
@@ -320,8 +403,14 @@ export default function SpotifyMigrator() {
                   },
                   body: JSON.stringify({ uris: chunk })
                 });
+                if (!addRes.ok) {
+                  addLog(`ERROR: Failed to add chunk ${i + 1}/${chunks.length} to playlist (HTTP ${addRes.status}).`);
+                  totalErrors++;
+                } else {
+                  addedCount += chunk.length;
+                }
               }
-              addLog(`Successfully added ${uris.length} tracks.`);
+              addLog(`Added ${addedCount}/${uris.length} tracks to playlist.`);
             }
           } else {
             addLog(`Skipping track addition: No valid tracks found.`);
@@ -331,12 +420,14 @@ export default function SpotifyMigrator() {
       } catch (err) {
         console.error(err);
         addLog(`ERROR copying ${playlist.name}: ${err.message}`);
+        totalErrors++;
       }
 
       completed++;
       setProgress((completed / total) * 100);
     }
 
+    setMigrationErrors(totalErrors);
     setCurrentAction('Migration Complete!');
     setStep(4);
   };
@@ -429,9 +520,21 @@ export default function SpotifyMigrator() {
       <div className="flex items-center justify-between bg-slate-800 p-4 rounded-lg border border-slate-700">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
-              <User className="w-5 h-5 text-white" />
-            </div>
+            {sourceProfile && 'external_urls' in sourceProfile ? (
+              <a href={sourceProfile.external_urls.spotify} target="_blank" rel="noopener noreferrer">
+                <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
+                  {sourceProfile.images && sourceProfile.images.length > 0 ? (
+                    <img src={sourceProfile.images[0].url} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
+                  ) : (
+                    <User className="w-5 h-5 text-white" />
+                  )}
+                </div>
+              </a>
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
+                <User className="w-5 h-5 text-white" />
+              </div>
+            )}
             <div>
               <div className="text-xs text-slate-400 uppercase tracking-wider">From</div>
               <div className="font-medium text-slate-200">{sourceProfile?.display_name}</div>
@@ -439,9 +542,21 @@ export default function SpotifyMigrator() {
           </div>
           <ArrowRight className="text-slate-500" />
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center">
-              <User className="w-5 h-5 text-white" />
-            </div>
+            {targetProfile && 'external_urls' in targetProfile ? (
+              <a href={targetProfile?.external_urls.spotify} target="_blank" rel="noopener noreferrer">
+                <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center">
+                  {targetProfile.images && targetProfile.images.length > 0 ? (
+                    <img src={targetProfile.images[0].url} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
+                  ) : (
+                    <User className="w-5 h-5 text-white" />
+                  )}
+                </div>
+              </a>
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center">
+                  <User className="w-5 h-5 text-white" />
+              </div>
+            )}
             <div>
               <div className="text-xs text-slate-400 uppercase tracking-wider">To</div>
               <div className="font-medium text-slate-200">{targetProfile?.display_name}</div>
@@ -501,7 +616,7 @@ export default function SpotifyMigrator() {
 
               <div className="flex-1">
                 <div className="font-medium text-slate-200">{p.name}</div>
-                <div className="text-sm text-slate-500">{p.tracks.total} tracks {p.isLikedSongs && '(Saved Tracks)'}</div>
+                <div className="text-sm text-slate-500">{p.items.total} tracks</div>
               </div>
             </div>
           ))
@@ -554,8 +669,15 @@ export default function SpotifyMigrator() {
       <div>
         <h2 className="text-3xl font-bold text-white mb-2">Transfer Complete!</h2>
         <p className="text-slate-400">
-          Successfully migrated {selectedPlaylists.size} items to {targetProfile?.display_name}.
+          Migrated {selectedPlaylists.size} item{selectedPlaylists.size !== 1 ? 's' : ''} to {targetProfile?.display_name}.
         </p>
+        {migrationErrors > 0 ? (
+          <p className="mt-2 text-sm text-red-400">
+            ⚠ {migrationErrors} error{migrationErrors !== 1 ? 's' : ''} occurred during migration. Check the logs for details.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-green-400">All items copied successfully with no errors.</p>
+        )}
       </div>
 
       <div className="flex justify-center gap-4 pt-4">
@@ -604,7 +726,7 @@ export default function SpotifyMigrator() {
             <h1 className="text-xl font-bold text-white tracking-tight">Spotify Migrator</h1>
           </div>
           <div className="text-xs font-mono text-slate-500 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
-            v1.1.0
+            v1.2.0
           </div>
         </div>
       </header>
