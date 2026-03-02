@@ -218,8 +218,8 @@ export default function SpotifyMigrator() {
 
   /**
    * Saves followed artists to the target account's library using PUT /me/library
-   * with spotify:user:{id} URIs (artists are also users). Max 40 URIs per request.
-   * Requires user-library-modify scope on the target token.
+   * with spotify:artist:{id} URIs (artists are also users). Max 40 URIs per request.
+   * Requires user-library-modify and user-follow-modify scope on the target token.
    */
   const saveFollowedArtists = async (artists: SpotifyArtist[]): Promise<{ saved: number; errors: number }> => {
     if (artists.length === 0) return { saved: 0, errors: 0 };
@@ -229,7 +229,7 @@ export default function SpotifyMigrator() {
       return { saved: artists.length, errors: 0 };
     }
 
-    const uris = artists.map(a => `spotify:user:${a.id}`);
+    const uris = artists.map(a => `spotify:artist:${a.id}`);
     const chunks = chunkArray(uris, 40);
     let saved = 0;
     let errors = 0;
