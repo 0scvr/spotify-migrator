@@ -5,14 +5,17 @@ import {
   CheckCircle,
   AlertCircle,
   Loader2,
-  Copy,
-  LogOut,
   Info,
   ListMusic,
   User,
   Github,
-  Heart
+  Heart,
+  FolderSync,
+  PlugZap
 } from 'lucide-react';
+import AccountHeader from './components/AccountHeader';
+import SelectableRow from './components/SelectableRow';
+import ProgressStepper from './components/ProgressStepper';
 
 /**
  * SPOTIFY API HELPER FUNCTIONS
@@ -85,6 +88,24 @@ type Image = {
   width: number;
 }
 
+type SpotifyArtist = {
+  id: string;
+  name: string;
+  images: Image[];
+  external_urls: { spotify: string };
+  uri: string;
+};
+
+type FollowedArtistsResponse = {
+  artists: {
+    href: string;
+    next: string | null;
+    cursors: { after: string; before: string };
+    total: number;
+    items: SpotifyArtist[];
+  };
+};
+
 export default function SpotifyMigrator() {
   // --- STATE ---
   const [step, setStep] = useState(1); // 1: Tokens, 2: Select, 3: Copying, 4: Done
@@ -102,6 +123,11 @@ export default function SpotifyMigrator() {
   const [playlists, setPlaylists] = useState<(Playlist | DemoPlaylist)[]>([]);
   const [selectedPlaylists, setSelectedPlaylists] = useState<Set<string>>(() => new Set());
   const playlistsContainerRef = useRef<HTMLDivElement>(null);
+
+  // Artist State
+  const [followedArtists, setFollowedArtists] = useState<SpotifyArtist[]>([]);
+  const [selectedArtists, setSelectedArtists] = useState<Set<string>>(() => new Set());
+  const artistsContainerRef = useRef<HTMLDivElement>(null);
 
   // Migration State
   const [logs, setLogs] = useState<string[]>([]);
@@ -142,6 +168,15 @@ export default function SpotifyMigrator() {
       // Fetch playlists for source
       await fetchSourcePlaylists(sourceToken);
 
+      // Fetch followed artists for source
+      try {
+        const artists = await fetchFollowedArtists(sourceToken);
+        setFollowedArtists(artists);
+      } catch (err) {
+        console.warn('Could not fetch followed artists:', err);
+        setFollowedArtists([]);
+      }
+
       setStep(2);
     } catch (err) {
       if (err instanceof Error) {
@@ -152,6 +187,72 @@ export default function SpotifyMigrator() {
     } finally {
       setLoadingProfile(false);
     }
+  };
+
+  const fetchFollowedArtists = async (token: string): Promise<SpotifyArtist[]> => {
+    if (demoMode) {
+      return [
+        { id: 'demo_artist_1', name: 'Tame Impala', images: [], external_urls: { spotify: '' }, uri: 'spotify:artist:demo_artist_1' },
+        { id: 'demo_artist_2', name: 'Caribou',     images: [], external_urls: { spotify: '' }, uri: 'spotify:artist:demo_artist_2' },
+      ];
+    }
+
+    const allArtists: SpotifyArtist[] = [];
+    // Cursor-based pagination: start without an `after` param, then follow `next` URLs
+    let url: string | null = `${SPOTIFY_API_BASE}/me/following?type=artist&limit=50`;
+
+    while (url) {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to fetch followed artists (HTTP ${res.status})`);
+      }
+      const data: FollowedArtistsResponse = await res.json();
+      allArtists.push(...data.artists.items);
+      url = data.artists.next; // null when there are no more pages
+    }
+
+    return allArtists;
+  };
+
+  /**
+   * Saves followed artists to the target account's library using PUT /me/library
+   * with spotify:user:{id} URIs (artists are also users). Max 40 URIs per request.
+   * Requires user-library-modify scope on the target token.
+   */
+  const saveFollowedArtists = async (artists: SpotifyArtist[]): Promise<{ saved: number; errors: number }> => {
+    if (artists.length === 0) return { saved: 0, errors: 0 };
+
+    if (demoMode) {
+      await wait(600);
+      return { saved: artists.length, errors: 0 };
+    }
+
+    const uris = artists.map(a => `spotify:user:${a.id}`);
+    const chunks = chunkArray(uris, 40);
+    let saved = 0;
+    let errors = 0;
+
+    for (const [i, chunk] of chunks.entries()) {
+      const urisParam = chunk.join(',');
+      const res = await fetch(`${SPOTIFY_API_BASE}/me/library?uris=${encodeURIComponent(urisParam)}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${targetToken}` }
+      });
+
+      if (!res.ok) {
+        console.error(`Failed to save artist chunk ${i + 1}/${chunks.length} (HTTP ${res.status})`);
+        errors += chunk.length;
+      } else {
+        saved += chunk.length;
+      }
+
+      // Throttle to avoid rate limits
+      if (i < chunks.length - 1) await wait(100);
+    }
+
+    return { saved, errors };
   };
 
   const fetchSourcePlaylists = async (token: string) => {
@@ -239,14 +340,42 @@ export default function SpotifyMigrator() {
     }
   };
 
+  const toggleArtistSelection = (id: string) => {
+    const container = artistsContainerRef.current;
+    const savedScrollTop = container?.scrollTop ?? 0;
+
+    setSelectedArtists((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
+      return newSet;
+    });
+
+    if (container) {
+      requestAnimationFrame(() => {
+        if (artistsContainerRef.current) {
+          artistsContainerRef.current.scrollTop = savedScrollTop;
+        }
+      });
+    }
+  };
+
+  const selectAllArtists = () => {
+    if (selectedArtists.size === followedArtists.length) {
+      setSelectedArtists(new Set());
+    } else {
+      setSelectedArtists(new Set(followedArtists.map(a => a.id)));
+    }
+  };
+
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
   const startMigration = async () => {
-    setStep(3);
+    setStep(4);
     setLogs([]);
     setProgress(0);
     setMigrationErrors(0);
-    const total = selectedPlaylists.size;
+    const total = selectedPlaylists.size + (selectedArtists.size > 0 ? 1 : 0);
     let completed = 0;
     let totalErrors = 0;
 
@@ -427,9 +556,44 @@ export default function SpotifyMigrator() {
       setProgress((completed / total) * 100);
     }
 
+    // ==========================================
+    // MIGRATE FOLLOWED ARTISTS
+    // ==========================================
+    if (selectedArtists.size > 0) {
+      setCurrentAction('Migrating followed artists...');
+      addLog(`Starting migration for ${selectedArtists.size} followed artist(s).`);
+
+      try {
+        const artistsToSave = followedArtists.filter(a => selectedArtists.has(a.id));
+        if (artistsToSave.length === 0) {
+          addLog('No matching artists found to migrate.');
+        } else {
+          const result = await saveFollowedArtists(artistsToSave);
+
+          if (result.errors > 0) {
+            addLog(`WARNING: ${result.errors} artist(s) failed to save to target library.`);
+            totalErrors += result.errors;
+          }
+          if (result.saved > 0) {
+            addLog(`Successfully saved ${result.saved}/${artistsToSave.length} artist(s) to target library.`);
+          }
+          if (result.saved === 0 && result.errors === 0) {
+            addLog('No artists were saved (empty response from API).');
+          }
+        }
+      } catch (err) {
+        console.error(err);
+        addLog(`ERROR migrating artists: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        totalErrors++;
+      }
+
+      completed++;
+      setProgress((completed / total) * 100);
+    }
+
     setMigrationErrors(totalErrors);
     setCurrentAction('Migration Complete!');
-    setStep(4);
+    setStep(5);
   };
 
   // --- RENDER HELPERS ---
@@ -439,13 +603,13 @@ export default function SpotifyMigrator() {
       <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
         <h3 className="font-semibold text-slate-200 mb-2 flex items-center gap-2">
           <Info className="w-4 h-4 text-sky-400" />
-          How to get tokens
+          How to get your auth tokens
         </h3>
         <p className="text-sm text-slate-400 mb-2">
-          To copy Playlists & Liked Songs, you need the following permissions:
+          To copy Playlists & Liked Songs & Followed Artists, you need the following permissions:
         </p>
         <ul className="list-disc list-inside text-sm text-slate-400 space-y-1 ml-1 mb-2">
-          <li><strong>Source:</strong> <code>playlist-read-private</code>, <code>user-library-read</code>, <code>playlist-read-collaborative</code></li>
+          <li><strong>Source:</strong> <code>playlist-read-private</code>, <code>user-library-read</code>, <code>playlist-read-collaborative</code>, <code>user-follow-read</code></li>
           <li><strong>Target:</strong> <code>playlist-modify-public</code>, <code>playlist-modify-private</code>, <code>user-library-modify</code></li>
         </ul>
         <ol className="list-decimal list-inside text-sm text-slate-400 space-y-1 ml-1">
@@ -508,68 +672,20 @@ export default function SpotifyMigrator() {
           disabled={(!sourceToken || !targetToken) && !demoMode || loadingProfile}
           className="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-full font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
         >
-          {loadingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+          {loadingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlugZap className="w-4 h-4" />}
           Connect Accounts
         </button>
       </div>
     </div>
   );
 
-  const Step2Select = () => (
+  const Step2SelectPlaylists = () => (
     <div className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
-      <div className="flex items-center justify-between bg-slate-800 p-4 rounded-lg border border-slate-700">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3">
-            {sourceProfile && 'external_urls' in sourceProfile ? (
-              <a href={sourceProfile.external_urls.spotify} target="_blank" rel="noopener noreferrer">
-                <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
-                  {sourceProfile.images && sourceProfile.images.length > 0 ? (
-                    <img src={sourceProfile.images[0].url} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
-                  ) : (
-                    <User className="w-5 h-5 text-white" />
-                  )}
-                </div>
-              </a>
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
-                <User className="w-5 h-5 text-white" />
-              </div>
-            )}
-            <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wider">From</div>
-              <div className="font-medium text-slate-200">{sourceProfile?.display_name}</div>
-            </div>
-          </div>
-          <ArrowRight className="text-slate-500" />
-          <div className="flex items-center gap-3">
-            {targetProfile && 'external_urls' in targetProfile ? (
-              <a href={targetProfile?.external_urls.spotify} target="_blank" rel="noopener noreferrer">
-                <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center">
-                  {targetProfile.images && targetProfile.images.length > 0 ? (
-                    <img src={targetProfile.images[0].url} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
-                  ) : (
-                    <User className="w-5 h-5 text-white" />
-                  )}
-                </div>
-              </a>
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center">
-                  <User className="w-5 h-5 text-white" />
-              </div>
-            )}
-            <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wider">To</div>
-              <div className="font-medium text-slate-200">{targetProfile?.display_name}</div>
-            </div>
-          </div>
-        </div>
-        <button
-          onClick={() => setStep(1)}
-          className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
-        >
-          <LogOut className="w-3 h-3" /> Change Accounts
-        </button>
-      </div>
+      <AccountHeader
+        sourceProfile={sourceProfile}
+        targetProfile={targetProfile}
+        onChangeAccounts={() => setStep(1)}
+      />
 
       <div className="flex items-center justify-between py-2">
         <h2 className="text-xl font-semibold text-white">Select Playlists</h2>
@@ -589,54 +705,111 @@ export default function SpotifyMigrator() {
           <div className="p-8 text-center text-slate-500">No playlists found on source account.</div>
         ) : (
           playlists.map(p => (
-            <div
+            <SelectableRow
               key={p.id}
+              selected={selectedPlaylists.has(p.id)}
               onClick={() => toggleSelection(p.id)}
-              className={`p-4 flex items-center gap-4 cursor-pointer border-b border-slate-800 transition-colors hover:bg-slate-800/50 ${selectedPlaylists.has(p.id) ? 'bg-slate-800' : ''}`}
-            >
-              <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedPlaylists.has(p.id) ? 'bg-green-500 border-green-500' : 'border-slate-600'}`}>
-                {selectedPlaylists.has(p.id) && <CheckCircle className="w-3.5 h-3.5 text-black" />}
-              </div>
-
-              {/* Special Render for Liked Songs */}
-              {p.isLikedSongs ? (
-                <div className="w-12 h-12 rounded bg-gradient-to-br from-purple-700 to-blue-600 flex items-center justify-center">
-                  <Heart className="w-6 h-6 text-white fill-current" />
-                </div>
-              ) : (
-                // Standard Playlist Render
-                p.images?.[0]?.url ? (
+              thumbnail={
+                p.isLikedSongs ? (
+                  <div className="w-12 h-12 rounded bg-gradient-to-br from-purple-700 to-blue-600 flex items-center justify-center">
+                    <Heart className="w-6 h-6 text-white fill-current" />
+                  </div>
+                ) : p.images?.[0]?.url ? (
                   <img src={p.images[0].url} alt="" className="w-12 h-12 rounded bg-slate-800 object-cover" />
                 ) : (
                   <div className="w-12 h-12 rounded bg-slate-800 flex items-center justify-center">
                     <Music className="w-6 h-6 text-slate-600" />
                   </div>
                 )
-              )}
-
-              <div className="flex-1">
-                <div className="font-medium text-slate-200">{p.name}</div>
-                <div className="text-sm text-slate-500">{p.items.total} tracks</div>
-              </div>
-            </div>
+              }
+            >
+              <div className="font-medium text-slate-200">{p.name}</div>
+              <div className="text-sm text-slate-500">{p.items.total} tracks</div>
+            </SelectableRow>
           ))
         )}
       </div>
 
       <div className="flex justify-end pt-4">
         <button
-          onClick={startMigration}
-          disabled={selectedPlaylists.size === 0}
-          className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-full font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-green-900/20 flex items-center gap-2"
+          onClick={() => setStep(3)}
+          className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-full font-medium transition-all shadow-lg shadow-green-900/20 flex items-center gap-2"
         >
-          <Copy className="w-4 h-4" />
-          Copy {selectedPlaylists.size} Playlists
+          <ArrowRight className="w-4 h-4" />
+          Next: Select Followed Artists
         </button>
       </div>
     </div>
   );
 
-  const Step3Progress = () => (
+  const Step3SelectArtists = () => (
+    <div className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
+      <AccountHeader
+        sourceProfile={sourceProfile}
+        targetProfile={targetProfile}
+        onChangeAccounts={() => setStep(1)}
+      />
+
+      <div className="flex items-center justify-between py-2">
+        <h2 className="text-xl font-semibold text-white">Select Artists to Follow</h2>
+        {followedArtists.length > 0 && (
+          <button
+            onClick={selectAllArtists}
+            className="text-sm text-green-400 hover:text-green-300 font-medium"
+          >
+            {selectedArtists.size === followedArtists.length ? 'Deselect All' : 'Select All'}
+          </button>
+        )}
+      </div>
+
+      <div
+        ref={artistsContainerRef}
+        className="bg-slate-900 border border-slate-700 rounded-lg overflow-hidden max-h-[400px] overflow-y-auto custom-scrollbar"
+      >
+        {followedArtists.length === 0 ? (
+          <div className="p-8 text-center text-slate-500">No followed artists found on source account.</div>
+        ) : (
+          followedArtists.map(a => (
+            <SelectableRow
+              key={a.id}
+              selected={selectedArtists.has(a.id)}
+              onClick={() => toggleArtistSelection(a.id)}
+              thumbnail={
+                a.images?.[0]?.url ? (
+                  <img src={a.images[0].url} alt="" className="w-12 h-12 rounded-full bg-slate-800 object-cover" />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center">
+                    <User className="w-6 h-6 text-slate-600" />
+                  </div>
+                )
+              }
+            >
+              <div className="font-medium text-slate-200">{a.name}</div>
+            </SelectableRow>
+          ))
+        )}
+      </div>
+
+      <div className="flex justify-between pt-4">
+        <button
+          onClick={() => setStep(2)}
+          className="px-6 py-3 rounded-full border border-slate-600 text-slate-300 hover:bg-slate-800 transition-colors flex items-center gap-2"
+        >
+          Back to Playlists
+        </button>
+        <button
+          onClick={startMigration}
+          disabled={selectedPlaylists.size === 0 && selectedArtists.size === 0}
+          className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-full font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-green-900/20 flex items-center gap-2"
+        >
+          <FolderSync className="w-4 h-4" />
+          Start Migration
+        </button>
+      </div>
+    </div>
+  );
+
+  const Step4Progress = () => (
     <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
       <div className="text-center space-y-2 py-8">
         <Loader2 className="w-12 h-12 text-green-500 animate-spin mx-auto" />
@@ -660,7 +833,7 @@ export default function SpotifyMigrator() {
     </div>
   );
 
-  const Step4Done = () => (
+  const Step5Done = () => (
     <div className="text-center space-y-6 py-10 animate-in fade-in zoom-in-95 duration-300">
       <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto">
         <CheckCircle className="w-10 h-10 text-green-500" />
@@ -669,7 +842,7 @@ export default function SpotifyMigrator() {
       <div>
         <h2 className="text-3xl font-bold text-white mb-2">Transfer Complete!</h2>
         <p className="text-slate-400">
-          Migrated {selectedPlaylists.size} item{selectedPlaylists.size !== 1 ? 's' : ''} to {targetProfile?.display_name}.
+          Migrated {selectedPlaylists.size} playlist{selectedPlaylists.size !== 1 ? 's' : ''} and {selectedArtists.size} artist{selectedArtists.size !== 1 ? 's' : ''} to {targetProfile?.display_name}.
         </p>
         {migrationErrors > 0 ? (
           <p className="mt-2 text-sm text-red-400">
@@ -726,7 +899,7 @@ export default function SpotifyMigrator() {
             <h1 className="text-xl font-bold text-white tracking-tight">Spotify Migrator</h1>
           </div>
           <div className="text-xs font-mono text-slate-500 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
-            v1.2.0
+            v1.3.0
           </div>
         </div>
       </header>
@@ -735,41 +908,24 @@ export default function SpotifyMigrator() {
       <main className="flex-1 w-full max-w-3xl mx-auto px-6 py-8">
 
         {/* Progress Stepper */}
-        <div className="flex items-center justify-between mb-12 relative">
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-0.5 bg-slate-800 -z-10" />
-
-          {[
+        <ProgressStepper
+          currentStep={step}
+          steps={[
             { num: 1, label: 'Connect' },
-            { num: 2, label: 'Select' },
-            { num: 3, label: 'Transfer' },
-            { num: 4, label: 'Done' }
-          ].map((s) => {
-            const isActive = step >= s.num;
-            const isCurrent = step === s.num;
-            return (
-              <div key={s.num} className="flex flex-col items-center gap-2 bg-slate-950 px-2">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300
-                    ${isActive ? 'bg-green-500 text-black scale-110' : 'bg-slate-800 text-slate-500'}
-                    ${isCurrent ? 'ring-4 ring-green-500/20' : ''}
-                  `}
-                >
-                  {isActive ? <CheckCircle className="w-5 h-5" /> : s.num}
-                </div>
-                <span className={`text-xs font-medium ${isActive ? 'text-green-400' : 'text-slate-600'}`}>
-                  {s.label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+            { num: 2, label: 'Playlists' },
+            { num: 3, label: 'Artists' },
+            { num: 4, label: 'Transfer' },
+            { num: 5, label: 'Done' }
+          ]}
+        />
 
         {/* Views */}
         <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl">
           {step === 1 && <Step1Tokens />}
-          {step === 2 && <Step2Select />}
-          {step === 3 && <Step3Progress />}
-          {step === 4 && <Step4Done />}
+          {step === 2 && <Step2SelectPlaylists />}
+          {step === 3 && <Step3SelectArtists />}
+          {step === 4 && <Step4Progress />}
+          {step === 5 && <Step5Done />}
         </div>
 
       </main>
